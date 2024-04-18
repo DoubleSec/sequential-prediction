@@ -1,0 +1,13 @@
+train_data_path: data/2023_data.parquet
+
+features:
+  - 
+    - [pitcher, categorical]
+  -
+    - [description, categorical]
+    - [pitch_speed, numeric]
+
+keys:
+  - game_pk
+  - at_bat_number
+  - pitch_number
