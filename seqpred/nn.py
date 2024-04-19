@@ -30,10 +30,6 @@ class MarginalHead(nn.Module):
                 for col, morpher in morphers.items()
             }
         )
-        self.criteria = {
-            col: morpher.make_criterion()
-            for col, morpher in morphers.items()
-        }
 
     def forward(self, input_embedding, features):
         # n x k x e
@@ -74,9 +70,16 @@ class MarginalHead(nn.Module):
 
 class MargeNet(pl.LightningModule):
 
-    def __init__(self, morphers: dict, hidden_size: int, initial_feature: str):
+    def __init__(
+        self,
+        morphers: dict,
+        hidden_size: int,
+        initial_feature: str,
+        optim_lr: float,
+    ):
         super().__init__()
         self.save_hyperparameters()
+        self.optim_lr = optim_lr
 
         # Get the first feature's embedder
         self.init_feature = initial_feature
@@ -93,9 +96,45 @@ class MargeNet(pl.LightningModule):
             hidden_size=hidden_size
         )
 
+        self.criteria = {
+            col: morpher.make_criterion()
+            for col, morpher in morphers.items()
+            if col != initial_feature
+        }
+
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.optim_lr)
+        return optimizer
+
+
     def forward(self, x):
         ie = self.init_embedder(x[self.init_feature])
         ie = self.init_activation(self.init_norm(ie))
         print(ie)
         predictions = self.generator_head(ie, x)
         return predictions
+
+
+    def training_step(self, x):
+        preds = self(x)
+        loss_dict = {
+            f"train_{col}_loss": criterion(preds[col], x[col]).mean()
+            for col, criterion in self.criteria.items()
+        }
+        self.log_dict(loss_dict)
+        total_loss = sum(loss_dict.values())
+        self.log("train_loss", total_loss)
+        return total_loss
+
+
+    def validation_step(self, x):
+        preds = self(x)
+        loss_dict = {
+            f"validation_{col}_loss": criterion(preds[col], x[col]).mean()
+            for col, criterion in self.criteria.items()
+        }
+        self.log_dict(loss_dict)
+        total_loss = sum(loss_dict.values())
+        self.log("validation_loss", total_loss)
+        return total_loss
