@@ -10,13 +10,13 @@ DEFAULT_MORPHER_DISPATCH = {
 }
 
 
-
 def prep_data(
     data_files: str,
     key_cols: list,
     cols: dict,
     data_output: str,
     morpher_output: str,
+    write: bool = True
 ):
     """Prepare data according to a morpher dict."""
 
@@ -43,7 +43,42 @@ def prep_data(
         .drop_nulls([feature for feature in morphers])
     )
 
-    input_data.to_parquet(data_output)
-    morpher_dict = {column: morpher.save_state_dict() for column, morpher in morphers.items()}
-    with open(morpher_output, "w") as f:
-        yaml.dump(morpher_dict, f)
+    if write:
+        input_data.write_parquet(data_output)
+        morpher_dict = {column: morpher.save_state_dict() for column, morpher in morphers.items()}
+        with open(morpher_output, "w") as f:
+            yaml.dump(morpher_dict, f)
+
+    return input_data, morphers
+
+class BaseDataset(torch.utils.data.Dataset):
+
+    def __init__(
+        self,
+        ds: pl.DataFrame,
+        morphers: dict,
+        key_cols: list = [],
+        return_keys: bool = False
+        ):
+
+        super().__init__()
+        self.ds = ds
+        self.morphers = morphers
+        self.key_cols = key_cols
+        self.return_keys = return_keys
+
+    def __len__(self):
+        return self.ds.height
+
+    def __getitem__(self, idx):
+        row = self.ds.row(idx, named=True)
+        inputs = {
+            k: torch.tensor(row[k], dtype=morpher.required_dtype)
+            for k, morpher in self.morphers.items()
+        }
+
+        return_dict = inputs
+        if self.return_keys:
+            return_dict = return_dict | {key: row[key] for key in self.key_cols}
+
+        return return_dict

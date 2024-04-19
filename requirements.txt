@@ -1,4 +1,5 @@
 pyyaml
 pybaseball
 polars
+lightning
 morphers @ git+https://github.com/play4honor/morphers.git@main

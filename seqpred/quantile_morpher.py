@@ -7,14 +7,14 @@ import numpy as np
 
 class Quantiler(Morpher):
 
-    N_QUANTILES = 32
+    N_QUANTILES = 64
 
     def __init__(self, quantiles):
         self.quantiles = quantiles
 
     @property
     def required_dtype(self):
-        return torch.int64
+        return torch.float32
 
     @property
     def missing_value(self):
@@ -32,7 +32,7 @@ class Quantiler(Morpher):
     @classmethod
     def from_data(cls, x):
         q = np.linspace(0, 1, cls.N_QUANTILES - 1)
-        quantiles = np.quantile(x.to_numpy(), q).tolist()
+        quantiles = np.nanquantile(x.to_numpy(), q).tolist()
         return cls(quantiles)
 
     def save_state_dict(self):

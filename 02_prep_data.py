@@ -1,3 +1,6 @@
+# You may not need this, but if you want to preprocess data
+# you can use this file.
+
 import morphers
 import yaml
 
@@ -7,7 +10,7 @@ from seqpred.quantile_morpher import Quantiler
 with open("cfg/config.yaml", "r") as f:
     config = yaml.load(f, Loader=yaml.CLoader)
 
-input_files = ["data/2023h1.parquet", "data/2023h2.parquet"]
+input_files = [config["train_data_path"]]
 
 morpher_dispatch = {
     "numeric": Quantiler,
@@ -25,6 +28,6 @@ prep_data(
     data_files=input_files,
     key_cols=config["keys"],
     cols=inputs,
-    data_output="data/prepped_data.parquet",
-    morpher_output="data/morphers.yaml",
+    data_output=config["processed_data_path"],
+    morpher_output=config["morpher_path"],
 )
