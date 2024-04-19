@@ -55,6 +55,8 @@ class Quantiler(Morpher):
         return torch.nn.Linear(in_features=x, out_features=self.N_QUANTILES)
 
     def make_criterion(self):
+        # TKTK do this the other way, transforming the probabilites to an EV
+        # and then doing mse
         def quantile_bce(input, target):
             target = torch.floor(target * self.N_QUANTILES).long()
             return torch.nn.functional.cross_entropy(input, target, reduction="none")
