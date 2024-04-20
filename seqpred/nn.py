@@ -40,7 +40,6 @@ class MarginalHead(nn.Module):
             ],
             dim=1,
         )
-        print(embeddings)
 
         # n x k x k x e
         mask = (
@@ -111,7 +110,6 @@ class MargeNet(pl.LightningModule):
     def forward(self, x):
         ie = self.init_embedder(x[self.init_feature])
         ie = self.init_activation(self.init_norm(ie))
-        print(ie)
         predictions = self.generator_head(ie, x)
         return predictions
 

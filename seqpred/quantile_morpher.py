@@ -1,9 +1,16 @@
 from morphers import Morpher
 from morphers.nn import Unsqueezer
+import morphers
 import torch
 import polars as pl
 import numpy as np
 
+
+class Integerizer(morphers.Integerizer):
+    """The default morpher expects quite a weird shape,
+    so fix it for a normal case."""
+    def make_criterion(self):
+        return torch.nn.CrossEntropyLoss(reduction="none")
 
 class Quantiler(Morpher):
 

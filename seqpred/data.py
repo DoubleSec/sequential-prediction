@@ -14,9 +14,9 @@ def prep_data(
     data_files: str,
     key_cols: list,
     cols: dict,
-    data_output: str,
-    morpher_output: str,
-    write: bool = True
+    data_output: str = None,
+    morpher_output: str = None,
+    write: bool = False,
 ):
     """Prepare data according to a morpher dict."""
 

@@ -1,6 +1,4 @@
-train_data_path: ../drive/MyDrive/baseball/2023_data.parquet
-processed_data_path: ../drive/MyDrive/baseball/2023_processed.parquet
-morpher_path: ../drive/MyDrive/baseball/morphers.yaml
+train_data_path: ../2023_data.parquet
 
 features:
   - [pitcher, categorical]
@@ -12,8 +10,8 @@ keys:
   - at_bat_number
   - pitch_number
 
-max_epochs: 3
+max_epochs: 10
 log_every_n: 30
-precision: 16-true
+precision: 16-mixed
 hidden_size: 64
 lr: 0.001
