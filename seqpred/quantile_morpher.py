@@ -14,7 +14,7 @@ class Integerizer(morphers.Integerizer):
 
 class Quantiler(Morpher):
 
-    N_QUANTILES = 64
+    N_QUANTILES = 128
 
     def __init__(self, quantiles):
         self.quantiles = quantiles
@@ -30,7 +30,7 @@ class Quantiler(Morpher):
         return 0.5
 
     def __call__(self, x):
-        q = pl.Series(self.quantiles)
+        q = pl.Series(self.quantiles[:-1])
         return (
             x.cut(q, labels=np.arange(self.N_QUANTILES).astype("str")).cast(pl.Float32)
             / self.N_QUANTILES
@@ -38,7 +38,7 @@ class Quantiler(Morpher):
 
     @classmethod
     def from_data(cls, x):
-        q = np.linspace(0, 1, cls.N_QUANTILES - 1)
+        q = np.linspace(0, 1, cls.N_QUANTILES)
         quantiles = np.nanquantile(x.to_numpy(), q).tolist()
         return cls(quantiles)
 
@@ -62,13 +62,17 @@ class Quantiler(Morpher):
         return torch.nn.Linear(in_features=x, out_features=self.N_QUANTILES)
 
     def make_criterion(self):
-        # TKTK do this the other way, transforming the probabilites to an EV
-        # and then doing mse
-        def quantile_bce(input, target):
-            target = torch.floor(target * self.N_QUANTILES).long()
-            return torch.nn.functional.cross_entropy(input, target, reduction="none")
+        # Each bucket means exactly the quantile value, so there's some 
+        # quantization error.
+        def ev_mse(input, target):
+            ev = torch.sum(
+                torch.softmax(input, dim=1) 
+                * torch.linspace(0, 1, self.N_QUANTILES).to(input).view(1, -1),
+                dim=-1
+            )
+            return torch.nn.functional.mse_loss(ev, target, reduction="none")
 
-        return quantile_bce
+        return ev_mse
 
 
 if __name__ == "__main__":

@@ -83,8 +83,6 @@ class MargeNet(pl.LightningModule):
         # Get the first feature's embedder
         self.init_feature = initial_feature
         self.init_embedder = morphers[initial_feature].make_embedding(hidden_size)
-        self.init_norm = nn.LayerNorm(hidden_size)
-        self.init_activation = nn.GELU()
 
         self.generator_head = MarginalHead(
             morphers={
@@ -109,7 +107,6 @@ class MargeNet(pl.LightningModule):
 
     def forward(self, x):
         ie = self.init_embedder(x[self.init_feature])
-        ie = self.init_activation(self.init_norm(ie))
         predictions = self.generator_head(ie, x)
         return predictions
 

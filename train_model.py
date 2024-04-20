@@ -27,6 +27,12 @@ base_data, morphers = prep_data(
     key_cols=config["keys"],
     cols=inputs,
 )
+morpher_states = {
+    col: morpher.save_state_dict()
+    for col, morpher in morphers.items()
+}
+with open("model/morphers.yaml", "w") as f:
+    yaml.dump(morpher_states, f)
 
 ds = BaseDataset(
     base_data,
@@ -62,3 +68,4 @@ trainer = pl.Trainer(
 )
 
 trainer.fit(net, train_dataloaders=train_dl, val_dataloaders=valid_dl)
+trainer.save_checkpoint("model/latest.ckpt")

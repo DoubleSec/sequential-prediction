@@ -10,8 +10,8 @@ keys:
   - at_bat_number
   - pitch_number
 
-max_epochs: 10
+max_epochs: 20
 log_every_n: 30
 precision: 16-mixed
-hidden_size: 64
+hidden_size: 128
 lr: 0.001

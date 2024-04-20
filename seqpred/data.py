@@ -3,17 +3,26 @@ import torch
 import yaml
 import morphers
 
-# So we can re-use easily enough.
-DEFAULT_MORPHER_DISPATCH = {
-    "numeric": morphers.RankScaler,
-    "categorical": morphers.Integerizer,
-}
+def load_morphers(
+    state_path: str,
+    cols: dict,
+    type_map: dict,
+):
+    with open(state_path, "r") as f:
+        morpher_states = yaml.load(f, Loader=yaml.CLoader)
+
+    morphers = {
+        col: type_map[ctype].from_state_dict(morpher_states[col])
+        for col, ctype in cols.items()
+    }
+    return morphers
 
 
 def prep_data(
     data_files: str,
-    key_cols: list,
-    cols: dict,
+    key_cols: list = [],
+    cols: dict = None,
+    morphers: dict = None,
     data_output: str = None,
     morpher_output: str = None,
     write: bool = False,
@@ -24,10 +33,13 @@ def prep_data(
     input_data = pl.concat(input_dataframes)
 
     # TKTK use existing morpher states
-    morphers = {
-        feature: morpher_class.from_data(input_data[feature])
-        for feature, morpher_class in cols.items()
-    }
+    if morphers is None:
+        morphers = {
+            feature: morpher_class.from_data(input_data[feature])
+            for feature, morpher_class in cols.items()
+        }
+    else:
+        morphers = morphers
 
     input_data = (
         input_data.select(
