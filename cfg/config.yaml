@@ -1,16 +1,23 @@
 train_data_path: ../2023_data.parquet
 
 features:
+  - [stand, categorical]
   - [pitcher, categorical]
   - [pitch_type, categorical]
   - [release_speed, numeric]
+  - [plate_x, numeric]
+  - [plate_z, numeric]
+
+context_features:
+  - stand
+  - pitcher
 
 keys:
   - game_pk
   - at_bat_number
   - pitch_number
 
-max_epochs: 20
+max_epochs: 30
 log_every_n: 30
 precision: 16-mixed
 hidden_size: 128

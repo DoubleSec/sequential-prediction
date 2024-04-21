@@ -30,7 +30,8 @@ class Quantiler(Morpher):
         return 0.5
 
     def __call__(self, x):
-        q = pl.Series(self.quantiles[:-1])
+        q = pl.Series(self.quantiles[1:])
+        # k means between the (k-1)th quantile and the kth quantile
         return (
             x.cut(q, labels=np.arange(self.N_QUANTILES).astype("str")).cast(pl.Float32)
             / self.N_QUANTILES
@@ -64,15 +65,11 @@ class Quantiler(Morpher):
     def make_criterion(self):
         # Each bucket means exactly the quantile value, so there's some 
         # quantization error.
-        def ev_mse(input, target):
-            ev = torch.sum(
-                torch.softmax(input, dim=1) 
-                * torch.linspace(0, 1, self.N_QUANTILES).to(input).view(1, -1),
-                dim=-1
-            )
-            return torch.nn.functional.mse_loss(ev, target, reduction="none")
+        def quantile_bce(input, target):
+            target = torch.round(target * self.N_QUANTILES).long()
+            return torch.nn.functional.cross_entropy(input, target, reduction="none")
 
-        return ev_mse
+        return quantile_bce
 
 
 if __name__ == "__main__":

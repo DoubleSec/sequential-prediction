@@ -58,7 +58,12 @@ valid_dl = torch.utils.data.DataLoader(
 )
 
 # Initialize network
-net = MargeNet(morphers, config["hidden_size"], "pitcher", config["lr"])
+net = MargeNet(
+    morphers=morphers, 
+    hidden_size=config["hidden_size"], 
+    initial_features=config["context_features"],
+    optim_lr=config["lr"],
+)
 
 trainer = pl.Trainer(
     max_epochs=config["max_epochs"],
