@@ -5,6 +5,8 @@ features:
   - [pitcher, categorical]
   - [pitch_type, categorical]
   - [release_speed, numeric]
+  - [pfx_x, numeric]
+  - [pfx_z, numeric]
   - [plate_x, numeric]
   - [plate_z, numeric]
 
@@ -17,8 +19,14 @@ keys:
   - at_bat_number
   - pitch_number
 
-max_epochs: 30
+# job
+n_workers: 10
 log_every_n: 30
-precision: 16-mixed
-hidden_size: 128
-lr: 0.001
+# Network spec
+precision: bf16
+hidden_size: 256
+# Learning dynamics
+max_epochs: 30
+lr: 0.003
+batch_size: 4096
+p_dropout: 0.5

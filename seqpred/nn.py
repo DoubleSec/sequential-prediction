@@ -115,6 +115,7 @@ class MargeNet(pl.LightningModule):
         hidden_size: int,
         initial_features: list,
         optim_lr: float,
+        p_dropout: float,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -128,6 +129,8 @@ class MargeNet(pl.LightningModule):
                 for init_feat in self.init_features
             }
         )
+        
+        self.dropout = nn.Dropout(p=p_dropout)
 
         self.generator_head = MarginalHead(
             morphers={

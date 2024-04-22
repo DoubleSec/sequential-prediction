@@ -47,14 +47,14 @@ train_ds, valid_ds = torch.utils.data.random_split(
 
 train_dl = torch.utils.data.DataLoader(
     train_ds,
-    batch_size=2048,
+    batch_size=config["batch_size"],
     shuffle=True,
-    num_workers=4,
+    num_workers=config["n_workers"],
 )
 valid_dl = torch.utils.data.DataLoader(
     valid_ds,
-    batch_size=2048,
-    num_workers=4,
+    batch_size=config["batch_size"],
+    num_workers=config["n_workers"],
 )
 
 # Initialize network
@@ -63,6 +63,7 @@ net = MargeNet(
     hidden_size=config["hidden_size"], 
     initial_features=config["context_features"],
     optim_lr=config["lr"],
+    p_dropout=config["p_dropout"],
 )
 
 trainer = pl.Trainer(
