@@ -24,6 +24,7 @@ n_workers: 10
 log_every_n: 30
 # Network spec
 precision: bf16
+head_type: sum
 hidden_size: 256
 # Learning dynamics
 max_epochs: 30

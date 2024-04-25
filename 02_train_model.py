@@ -59,6 +59,7 @@ valid_dl = torch.utils.data.DataLoader(
 
 # Initialize network
 net = MargeNet(
+    head_type=config["head_type"],
     morphers=morphers, 
     hidden_size=config["hidden_size"], 
     initial_features=config["context_features"],
