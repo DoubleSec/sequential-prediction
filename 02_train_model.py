@@ -3,7 +3,7 @@ import torch
 import lightning.pytorch as pl
 
 from seqpred.data import prep_data, BaseDataset
-from seqpred.quantile_morpher import Quantiler, Integerizer
+from seqpred.special_morpher import Quantiler, Integerizer, MixtureLossNormalizer
 from seqpred.nn import MargeNet
 
 with open("cfg/config.yaml", "r") as f:

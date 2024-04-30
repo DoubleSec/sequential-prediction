@@ -3,20 +3,8 @@ from torch import nn
 from torch.nn import functional as F
 import lightning.pytorch as pl
 
-from .quantile_morpher import Quantiler
-        
-def choose_options(p, temperature: float = 1.0):
-    """Function used for generation
-    Takes an array of logits, not probabilities, sorry."""
-    # p is n x k
-    p = torch.softmax(p / temperature, dim=-1)
-    agg_p = p.cumsum(dim=1)
-    rand = torch.rand(agg_p.shape[0], 1).to(agg_p)
-    p_arrays = torch.cat([agg_p, rand], dim=1)
-    # n x 1
-    ranks = torch.argsort(torch.argsort(p_arrays, dim=-1), dim=-1)
-    choices = ranks[:, -1]
-    return choices
+from .special_morpher import Quantiler
+
 
 def _make_masked_sums(embeddings):
     """Make a sum mask for some set of embeddings"""
@@ -47,7 +35,7 @@ class SumMarginalHead(nn.Module):
         """Should only expect morphers for the things to predict"""
 
         super().__init__()
-
+        self.morphers = morphers
         self.embedders = nn.ModuleDict(
             {
                 col: morpher.make_embedding(hidden_size)
@@ -84,7 +72,7 @@ class SumMarginalHead(nn.Module):
 
         return predictions
 
-    def generate(self, x, morphers):
+    def generate(self, x, **kwargs):
         # x is context
         # embeddings is n x len(predictors) x e
         embeddings = torch.zeros(
@@ -100,14 +88,12 @@ class SumMarginalHead(nn.Module):
 
             # Make a draw
             p_dist = predictor(total_context)
-            generated_values = choose_options(p_dist)
+            generated_values = self.morphers[feat].generate(p_dist, **kwargs)
 
-            # There must be a better way to do this.
-            if isinstance(morphers[feat], Quantiler):
-                generated_values = generated_values / morphers[feat].N_QUANTILES
             preds[feat] = generated_values
             new_embedding = self.embedders[feat](generated_values)
             embeddings[:, i+1, :] = new_embedding
+
         return preds
 
 
@@ -256,7 +242,7 @@ class MargeNet(pl.LightningModule):
         self.log("validation_loss", total_loss)
         return total_loss
 
-    def generate(self, x, morphers):
+    def generate(self, x, **kwargs):
         """Generate pitches.
 
         x should contain values for all the context features."""
@@ -265,4 +251,4 @@ class MargeNet(pl.LightningModule):
             self.init_embedders[init_feat](x[init_feat])
             for init_feat in self.init_features
         )
-        return self.generator_head.generate(context, morphers)
+        return self.generator_head.generate(context, **kwargs)
