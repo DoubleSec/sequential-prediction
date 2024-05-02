@@ -20,6 +20,7 @@ def load_morphers(
 
 def prep_data(
     data_files: str,
+    rename: dict = None,
     key_cols: list = [],
     cols: dict = None,
     morphers: dict = None,
@@ -31,6 +32,9 @@ def prep_data(
 
     input_dataframes = [pl.read_parquet(file) for file in data_files]
     input_data = pl.concat(input_dataframes)
+
+    if rename is not None:
+        input_data = input_data.rename({"type": "result_type"})
 
     # TKTK use existing morpher states
     if morphers is None:

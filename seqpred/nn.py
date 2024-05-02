@@ -6,25 +6,6 @@ import lightning.pytorch as pl
 from .special_morpher import Quantiler
 
 
-def _make_masked_sums(embeddings):
-    """Make a sum mask for some set of embeddings"""
-    mask = (
-        torch.ones([embeddings.shape[1], embeddings.shape[1]])
-        .to(embeddings)
-        .triu(diagonal=1)
-        .unsqueeze(0)
-        .unsqueeze(-1)
-        .expand([embeddings.shape[0], -1, -1, embeddings.shape[-1]])
-    )
-    masked_sums = (
-        embeddings
-        .unsqueeze(dim=2)
-        .expand([-1, -1, embeddings.shape[1], -1]) 
-        * mask
-    ).sum(dim=1)
-
-    return masked_sums
-
 class SumMarginalHead(nn.Module):
 
     def __init__(
@@ -62,7 +43,7 @@ class SumMarginalHead(nn.Module):
         )
 
         # n x k-1 x e (since the first dimension isn't predicted)
-        masked_sums = _make_masked_sums(embeddings)[:, 1:, :]
+        masked_sums = embeddings.cumsum(dim=1)[:, :-1, :]
         masked_sums = self.activation(self.norm(masked_sums))
 
         predictions = {
@@ -97,67 +78,10 @@ class SumMarginalHead(nn.Module):
         return preds
 
 
-class CatMarginalHead(nn.Module):
-
-    def __init__(
-        self,
-        morphers: dict,
-        hidden_size: int,
-    ):
-        """Should only expect morphers for the things to predict"""
-
-        super().__init__()
-
-        self.embedders = nn.ModuleDict(
-            {
-                col: morpher.make_embedding(hidden_size)
-                for col, morpher in morphers.items()
-            }
-        )
-        self.norm = nn.LayerNorm(2 * hidden_size)
-        self.activation = nn.GELU()
-        self.predictors = nn.ModuleDict(
-            {
-                col: morpher.make_predictor_head(2 * hidden_size)
-                for col, morpher in morphers.items()
-            }
-        )
-
-    def forward(self, input_embedding, features):
-        # now n x k x e
-        repeated_context = input_embedding.unsqueeze(1).expand(-1, len(self.embedders), -1)
-
-        # n x k x e
-        embeddings = torch.stack(
-            [
-                embedder(features[col]) 
-                for col, embedder in self.embedders.items()
-            ],
-            dim=1,
-        )
-        masked_sums = _make_masked_sums(embeddings)
-
-        # Cat so they're side-by-side
-        # n x k x 2e
-        embeddings = torch.cat([repeated_context, masked_sums], dim=-1)
-        masked_sums = self.activation(self.norm(embeddings))
-
-        predictions = {
-            col: predictor(masked_sums[:, i, :])
-            for i, (col, predictor) in enumerate(self.predictors.items())
-        }
-
-        return predictions
-
-    def generate(self, x, morphers):
-        # x is context
-        raise NotImplementedError("This doesn't work anyway so I didn't bother.")
-
 class MargeNet(pl.LightningModule):
 
     def __init__(
         self,
-        head_type: str,
         morphers: dict,
         hidden_size: int,
         initial_features: list,
@@ -179,25 +103,15 @@ class MargeNet(pl.LightningModule):
         
         self.dropout = nn.Dropout(p=p_dropout)
 
-        if head_type == "sum":
-            self.generator_head = SumMarginalHead(
-                morphers={
-                    col: morpher 
-                    for col, morpher in morphers.items() 
-                    if col not in self.init_features
-                },
-                hidden_size=hidden_size
-            )
-        elif head_type == "cat":
-            self.generator_head = CatMarginalHead(
-                morphers={
-                    col: morpher 
-                    for col, morpher in morphers.items() 
-                    if col not in self.init_features
-                },
-                hidden_size=hidden_size
-            )
-
+        self.generator_head = SumMarginalHead(
+            morphers={
+                col: morpher 
+                for col, morpher in morphers.items() 
+                if col not in self.init_features
+            },
+            hidden_size=hidden_size
+        )
+        
         self.criteria = {
             col: morpher.make_criterion()
             for col, morpher in morphers.items()

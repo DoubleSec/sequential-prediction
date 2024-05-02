@@ -24,6 +24,7 @@ inputs = {
 # Set up data
 base_data, morphers = prep_data(
     data_files=input_files,
+    rename=config["rename"],
     key_cols=config["keys"],
     cols=inputs,
 )
@@ -59,7 +60,6 @@ valid_dl = torch.utils.data.DataLoader(
 
 # Initialize network
 net = MargeNet(
-    head_type=config["head_type"],
     morphers=morphers, 
     hidden_size=config["hidden_size"], 
     initial_features=config["context_features"],

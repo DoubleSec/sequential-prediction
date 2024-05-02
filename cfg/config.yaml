@@ -1,18 +1,26 @@
 train_data_path: ../2023_data.parquet
 
+rename:
+  type: result_type
+
 features:
   - [stand, categorical]
   - [pitcher, categorical]
+  - [balls, categorical]
+  - [strikes, categorical]
   - [pitch_type, categorical]
   - [release_speed, numeric]
   - [pfx_x, numeric]
   - [pfx_z, numeric]
   - [plate_x, numeric]
   - [plate_z, numeric]
+  - [result_type, categorical]
 
 context_features:
   - stand
   - pitcher
+  - balls
+  - strikes
 
 keys:
   - game_pk
@@ -24,7 +32,6 @@ n_workers: 10
 log_every_n: 30
 # Network spec
 precision: bf16
-head_type: sum
 hidden_size: 256
 # Learning dynamics
 max_epochs: 30
