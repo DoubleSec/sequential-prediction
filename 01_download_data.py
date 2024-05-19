@@ -22,5 +22,5 @@ except FileExistsError:
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    some_data = pybaseball.statcast("2023-01-01", "2023-12-31")
+    some_data = pybaseball.statcast("2019-01-01", "2023-12-31")
     some_data.to_parquet(config["train_data_path"])

@@ -1,40 +1,41 @@
-train_data_path: ../2023_data.parquet
+train_data_path: ./data/all_data.parquet
 
 rename:
   type: result_type
 
 features:
-  - [stand, categorical]
-  - [pitcher, categorical]
-  - [balls, categorical]
-  - [strikes, categorical]
-  - [pitch_type, categorical]
-  - [release_speed, numeric]
-  - [pfx_x, numeric]
-  - [pfx_z, numeric]
-  - [plate_x, numeric]
-  - [plate_z, numeric]
-  - [result_type, categorical]
+  - [balls, categorical, {}]
+  - [strikes, categorical, {}]
+  - [pitcher, categorical, {}]
+  - [batter, categorical, {}]
+  - [stand, categorical, {}]
+  - [pitch_type, categorical, {}]
+  - [release_speed, numeric, {n_quantiles: 32}]
+  - [pfx_x, numeric, {n_quantiles: 32}]
+  - [pfx_z, numeric, {n_quantiles: 32}]
+  - [plate_x, numeric, {n_quantiles: 32}]
+  - [plate_z, numeric, {n_quantiles: 32}]
+  - [result_type, categorical, {}]
+  - [end_of_game, categorical, {}]
 
-context_features:
-  - stand
-  - pitcher
-  - balls
-  - strikes
 
-keys:
-  - game_pk
-  - at_bat_number
-  - pitch_number
 
 # job
 n_workers: 10
 log_every_n: 30
+
 # Network spec
 precision: bf16
 hidden_size: 256
+tr_args:
+  nhead: 4
+  dim_feedforward: 512
+  dropout: 0.1
+  num_layers: 4
+
 # Learning dynamics
 max_epochs: 30
 lr: 0.003
-batch_size: 4096
+batch_size: 128
+accumulate_batches: 4
 p_dropout: 0.5

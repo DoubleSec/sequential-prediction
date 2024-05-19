@@ -1,9 +1,34 @@
+import math
+
 import torch
 from torch import nn
 from torch.nn import functional as F
 import lightning.pytorch as pl
 
-from .special_morpher import Quantiler
+
+class BoringPositionalEncoding(nn.Module):
+    """
+    Shamelessly "adapted" from a torch tutorial
+    """
+
+    def __init__(self, max_length: int, d_model: int):
+        super().__init__()
+
+        position = torch.arange(max_length).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model)
+        )
+        pe = torch.zeros(1, max_length, d_model)
+        pe[0, :, 0::2] = torch.sin(position * div_term)
+        pe[0, :, 1::2] = torch.cos(position * div_term)
+        self.register_buffer("pe", pe)
+
+    def forward(self, x):
+        """
+        Arguments:
+            x: Tensor, shape ``[batch_size, seq_len, embedding_dim]``
+        """
+        return x + self.pe[:, : x.shape[1], :]
 
 
 class SumMarginalHead(nn.Module):
@@ -33,38 +58,51 @@ class SumMarginalHead(nn.Module):
         )
 
     def forward(self, input_embedding, features):
-        # n x k x e
+        # n x s x k x e
         embeddings = torch.stack(
-            [input_embedding] + [
-                embedder(features[col]) 
+            [input_embedding]
+            + [
+                # We don't make a prediction for a context-free first pitch.
+                embedder(features[col])[:, 1:, :]
                 for col, embedder in self.embedders.items()
             ],
-            dim=1,
+            dim=-2,
         )
 
-        # n x k-1 x e (since the first dimension isn't predicted)
-        masked_sums = embeddings.cumsum(dim=1)[:, :-1, :]
+        # n x s-1 x k-1 x e
+        masked_sums = embeddings.cumsum(dim=-2)[:, :, :-1, :]
         masked_sums = self.activation(self.norm(masked_sums))
 
         predictions = {
-            col: predictor(masked_sums[:, i, :])
+            col: predictor(masked_sums[:, :, i, :])
             for i, (col, predictor) in enumerate(self.predictors.items())
         }
 
         return predictions
 
+    def embed_inputs(self, features):
+        # We actually need to use the input embeddings twice in the process,
+        # once at the input to the transformer and once during generation.
+        # n x s x k x e
+        # (Probably just getting summed, but we'll see.)
+        embeddings = torch.stack(
+            [embedder(features[col]) for col, embedder in self.embedders.items()],
+            dim=-2,
+        )
+        return embeddings
+
     def generate(self, x, **kwargs):
-        # x is context
+        # x is context, n x s x e
         # embeddings is n x len(predictors) x e
         embeddings = torch.zeros(
-            [x.shape[0], len(self.predictors) + 1, x.shape[-1]]
+            [x.shape[0], x.shape[1], len(self.predictors) + 1, x.shape[-1]]
         ).to(x)
         preds = {}
-        embeddings[:, 0, :] = x
+        embeddings[:, :, 0, :] = x
         for i, (feat, predictor) in enumerate(self.predictors.items()):
-            
+
             # Predict on the previous context
-            total_context = torch.sum(embeddings[:, :i+1, :], dim=1)
+            total_context = torch.sum(embeddings[:, :, : i + 1, :], dim=-2)
             total_context = self.activation(self.norm(total_context))
 
             # Make a draw
@@ -73,70 +111,83 @@ class SumMarginalHead(nn.Module):
 
             preds[feat] = generated_values
             new_embedding = self.embedders[feat](generated_values)
-            embeddings[:, i+1, :] = new_embedding
+            embeddings[:, :, i + 1, :] = new_embedding
 
         return preds
 
 
-class MargeNet(pl.LightningModule):
+class SequentialMargeNet(pl.LightningModule):
 
     def __init__(
         self,
         morphers: dict,
         hidden_size: int,
-        initial_features: list,
+        max_length,
         optim_lr: float,
-        p_dropout: float,
+        tr_args: dict,
     ):
         super().__init__()
         self.save_hyperparameters()
         self.optim_lr = optim_lr
+        self.max_length = max_length
 
-        # Get the first feature's embedder
-        self.init_features = initial_features
-        self.init_embedders = nn.ModuleDict(
-            {
-                init_feat: morphers[init_feat].make_embedding(hidden_size)
-                for init_feat in self.init_features
-            }
-        )
-        
-        self.dropout = nn.Dropout(p=p_dropout)
-
+        # This also includes input embedding layers.
         self.generator_head = SumMarginalHead(
-            morphers={
-                col: morpher 
-                for col, morpher in morphers.items() 
-                if col not in self.init_features
-            },
-            hidden_size=hidden_size
+            morphers={col: morpher for col, morpher in morphers.items()},
+            hidden_size=hidden_size,
         )
-        
-        self.criteria = {
-            col: morpher.make_criterion()
-            for col, morpher in morphers.items()
-            if col not in self.init_features
-        }
 
+        self.position_embedder = BoringPositionalEncoding(
+            max_length=max_length, d_model=hidden_size
+        )
+        self.input_norm = nn.GELU()
+        self.register_buffer(
+            "causal_mask",
+            nn.Transformer.generate_square_subsequent_mask(max_length - 1),
+        )
+
+        self.transformer = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=hidden_size,
+                nhead=tr_args["nhead"],
+                dim_feedforward=tr_args["dim_feedforward"],
+                dropout=tr_args["dropout"],
+                activation="gelu",
+                batch_first=True,
+            ),
+            num_layers=tr_args["num_layers"],
+        )
+
+        self.criteria = {
+            col: morpher.make_criterion() for col, morpher in morphers.items()
+        }
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.optim_lr)
         return optimizer
 
-
     def forward(self, x):
-        context = sum(
-            self.init_embedders[init_feat](x[init_feat])
-            for init_feat in self.init_features
+        # Sequences in x run from the first pitch to the last pitch.
+        # Predictions run from the _second_ pitch to the last pitch.
+        # n x s-1 x k x e
+        tr_inputs = self.generator_head.embed_inputs(x)[:, :-1, :, :]
+        # n x s-1 x e
+        tr_inputs = tr_inputs.sum(dim=-2)
+        tr_inputs = self.input_norm(tr_inputs)
+        tr_inputs = self.position_embedder(tr_inputs)
+        tr_outputs = self.transformer(
+            tr_inputs,
+            mask=self.causal_mask,
+            src_key_padding_mask=x["pad_mask"][:, :-1],
+            is_causal=True,
         )
-        predictions = self.generator_head(context, x)
+        predictions = self.generator_head(tr_outputs, x)
         return predictions
-
 
     def training_step(self, x):
         preds = self(x)
         loss_dict = {
-            f"train_{col}_loss": criterion(preds[col], x[col]).mean()
+            f"train_{col}_loss": criterion(preds[col], x[col][:, 1:]).mean()
             for col, criterion in self.criteria.items()
         }
         self.log_dict(loss_dict)
@@ -144,13 +195,13 @@ class MargeNet(pl.LightningModule):
         self.log("train_loss", total_loss)
         return total_loss
 
-
     def validation_step(self, x):
         preds = self(x)
         loss_dict = {
-            f"validation_{col}_loss": criterion(preds[col], x[col]).mean()
+            f"validation_{col}_loss": criterion(preds[col], x[col][:, 1:]).mean()
             for col, criterion in self.criteria.items()
         }
+
         self.log_dict(loss_dict)
         total_loss = sum(loss_dict.values())
         self.log("validation_loss", total_loss)
@@ -161,8 +212,4 @@ class MargeNet(pl.LightningModule):
 
         x should contain values for all the context features."""
 
-        context = sum(
-            self.init_embedders[init_feat](x[init_feat])
-            for init_feat in self.init_features
-        )
-        return self.generator_head.generate(context, **kwargs)
+        raise NotImplementedError("TKTK")
