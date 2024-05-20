@@ -92,17 +92,17 @@ class SumMarginalHead(nn.Module):
         return embeddings
 
     def generate(self, x, **kwargs):
-        # x is context, n x s x e
+        # x is context, n x e
         # embeddings is n x len(predictors) x e
         embeddings = torch.zeros(
-            [x.shape[0], x.shape[1], len(self.predictors) + 1, x.shape[-1]]
+            [x.shape[0], len(self.predictors) + 1, x.shape[-1]]
         ).to(x)
         preds = {}
-        embeddings[:, :, 0, :] = x
+        embeddings[:, 0, :] = x
         for i, (feat, predictor) in enumerate(self.predictors.items()):
 
             # Predict on the previous context
-            total_context = torch.sum(embeddings[:, :, : i + 1, :], dim=-2)
+            total_context = torch.sum(embeddings[:, : i + 1, :], dim=-2)
             total_context = self.activation(self.norm(total_context))
 
             # Make a draw
@@ -111,7 +111,7 @@ class SumMarginalHead(nn.Module):
 
             preds[feat] = generated_values
             new_embedding = self.embedders[feat](generated_values)
-            embeddings[:, :, i + 1, :] = new_embedding
+            embeddings[:, i + 1, :] = new_embedding
 
         return preds
 
@@ -125,11 +125,13 @@ class SequentialMargeNet(pl.LightningModule):
         max_length,
         optim_lr: float,
         tr_args: dict,
+        loss_weights: dict = None,
     ):
         super().__init__()
         self.save_hyperparameters()
         self.optim_lr = optim_lr
         self.max_length = max_length
+        self.loss_weights = loss_weights
 
         # This also includes input embedding layers.
         self.generator_head = SumMarginalHead(
@@ -166,6 +168,12 @@ class SequentialMargeNet(pl.LightningModule):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.optim_lr)
         return optimizer
 
+    def on_train_start(self):
+        if self.loss_weights is not None:
+            print("Training using loss weights:")
+            for k, v in self.loss_weights.items():
+                print(f"{k}: {v:.3f}")
+
     def forward(self, x):
         # Sequences in x run from the first pitch to the last pitch.
         # Predictions run from the _second_ pitch to the last pitch.
@@ -186,30 +194,55 @@ class SequentialMargeNet(pl.LightningModule):
 
     def training_step(self, x):
         preds = self(x)
+        loss_mask = (~torch.isinf(x["pad_mask"])).float()
         loss_dict = {
-            f"train_{col}_loss": criterion(preds[col], x[col][:, 1:]).mean()
+            f"train_{col}_loss": (
+                criterion(preds[col], x[col][:, 1:]) * loss_mask[:, 1:]
+            ).mean()
             for col, criterion in self.criteria.items()
         }
         self.log_dict(loss_dict)
-        total_loss = sum(loss_dict.values())
+        if self.loss_weights is not None:
+            losses = [
+                loss_dict[f"train_{col}_loss"] * self.loss_weights[col]
+                for col in self.loss_weights
+            ]
+        else:
+            losses = loss_dict.values()
+        total_loss = sum(losses)
         self.log("train_loss", total_loss)
         return total_loss
 
     def validation_step(self, x):
         preds = self(x)
+        loss_mask = (~torch.isinf(x["pad_mask"])).float()
         loss_dict = {
-            f"validation_{col}_loss": criterion(preds[col], x[col][:, 1:]).mean()
+            f"validation_{col}_loss": (
+                criterion(preds[col], x[col][:, 1:]) * loss_mask[:, 1:]
+            ).mean()
             for col, criterion in self.criteria.items()
         }
-
         self.log_dict(loss_dict)
         total_loss = sum(loss_dict.values())
         self.log("validation_loss", total_loss)
         return total_loss
 
-    def generate(self, x, **kwargs):
-        """Generate pitches.
+    def generate_one(self, x, **kwargs):
+        """Generate a pitch.
 
-        x should contain values for all the context features."""
+        - x is an initial set of pitches
+        - kwargs are keyword arguments for the morphers' generate methods"""
 
-        raise NotImplementedError("TKTK")
+        tr_inputs = self.generator_head.embed_inputs(x)
+        input_length = tr_inputs.shape[1]
+        # n x s-1 x e
+        tr_inputs = tr_inputs.sum(dim=-2)
+        tr_inputs = self.input_norm(tr_inputs)
+        tr_inputs = self.position_embedder(tr_inputs)
+        tr_outputs = self.transformer(
+            tr_inputs,
+            mask=self.causal_mask[:input_length, :input_length],
+            is_causal=True,
+        )
+
+        return self.generator_head.generate(tr_outputs[:, -1, :], **kwargs)

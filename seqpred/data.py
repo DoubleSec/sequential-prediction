@@ -1,7 +1,6 @@
 import polars as pl
 import torch
 import yaml
-from morphers.polars.categorical import PolarsIntegerizer
 
 
 def load_morphers(
@@ -30,9 +29,11 @@ def pad_tensor_dict(tensor_dict, max_length, return_mask: bool = True):
         k: torch.nn.functional.pad(v, [0, max_length - init_length], value=0)
         for k, v in tensor_dict.items()
     }
+    # FALSE IS NOT PAD, TRUE IS PAD
     if return_mask:
-        pad_mask = torch.zeros([max_length], dtype=torch.float)
-        pad_mask[:init_length] = 1
+        pad_mask = torch.ones([max_length], dtype=torch.bool)
+        pad_mask[:init_length] = False
+        pad_mask = torch.where(pad_mask, float("-inf"), 0.0)
         return padded_tensor_dict, pad_mask
     else:
         return padded_tensor_dict
@@ -48,21 +49,43 @@ def prep_data(
     write: bool = False,
 ):
     """Prepare data according to a morpher dict.
-    The end_of_game feature is special and is constructed on the fly."""
+    The end_of_* features are special and are constructed here."""
 
     input_dataframes = [pl.read_parquet(file) for file in data_files]
     input_data = pl.concat(input_dataframes)
 
     if rename is not None:
-        input_data = input_data.rename({"type": "result_type"})
+        input_data = input_data.rename(rename)
+
+    # Create end_of_* indicators
+    input_data = (
+        input_data.with_columns(
+            pl.concat_str(
+                pl.col("inning"), pl.col("inning_topbot"), separator="-"
+            ).alias("complete_inning")
+        )
+        .sort(["game_pk", "at_bat_number", "pitch_number"])
+        .with_columns(
+            (
+                pl.col("complete_inning").over("game_pk")
+                != pl.col("complete_inning").over("game_pk").shift(-1, fill_value=-1)
+            ).alias("end_of_inning"),
+            (
+                pl.col("at_bat_number").over("game_pk")
+                != pl.col("at_bat_number").over("game_pk").shift(-1, fill_value=-1)
+            ).alias("end_of_at_bat"),
+            (pl.col("game_pk") != pl.col("game_pk").shift(-1, fill_value=-1)).alias(
+                "end_of_game"
+            ),
+        )
+    )
 
     # Use existing morpher states
     if morphers is None:
         morphers = {
             feature: morpher_class.from_data(input_data[feature], **kwargs)
             for feature, (morpher_class, kwargs) in cols.items()
-            if feature != "end_of_game"
-        } | {"end_of_game": PolarsIntegerizer({0: 0, 1: 1})}
+        }
     else:
         morphers = morphers
 
@@ -75,17 +98,12 @@ def prep_data(
             *[
                 morpher(morpher.fill_missing(pl.col(feature))).alias(feature)
                 for feature, morpher in morphers.items()
-                if feature != "end_of_game"
             ],
         )
         .sort(["at_bat_number", "pitch_number"])
         .group_by("game_pk", maintain_order=True)
         .agg(
-            *[
-                pl.col(feature)
-                for feature in morphers.keys()
-                if feature != "end_of_game"
-            ],
+            *[pl.col(feature) for feature in morphers.keys()],
             n_pitches=pl.col("pitch_number").count(),
         )
     )
@@ -124,13 +142,9 @@ class BaseDataset(torch.utils.data.Dataset):
             {
                 k: torch.tensor(row[k], dtype=morpher.required_dtype)
                 for k, morpher in self.morphers.items()
-                if k != "end_of_game"
             },
             max_length=self.max_length,
         )
-        # Make the end of game indicator
-        inputs["end_of_game"] = torch.zeros_like(inputs["pitcher"])
-        inputs["end_of_game"][row["n_pitches"] - 1] = 1
 
         inputs |= {"game_pk": row["game_pk"], "pad_mask": pad_mask}
         return inputs

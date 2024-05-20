@@ -1,11 +1,14 @@
 import yaml
 import torch
 import lightning.pytorch as pl
+from lightning.pytorch.callbacks import ModelCheckpoint
 
 from seqpred.data import prep_data, BaseDataset
 from morphers.polars.continuous import PolarsQuantiler
 from morphers.polars.categorical import PolarsIntegerizer
 from seqpred.nn import SequentialMargeNet
+
+torch.set_float32_matmul_precision("medium")
 
 with open("cfg/config.yaml", "r") as f:
     config = yaml.load(f, Loader=yaml.CLoader)
@@ -19,6 +22,15 @@ morpher_dispatch = {
 
 inputs = {
     col: (morpher_dispatch[tp], kwargs) for [col, tp, kwargs] in config["features"]
+}
+# Loss weighting, according to inverse of feature rank
+n_features = len(config["features"])
+print(f"n_features: {n_features}")
+# So they still sum to one.
+weight_multiplier = n_features / (n_features - (n_features - 1) * 0.5)
+loss_weights = {
+    ls[0]: ((n_features - i) / n_features) * weight_multiplier
+    for i, ls in enumerate(config["features"])
 }
 
 # Set up data
@@ -61,6 +73,7 @@ net = SequentialMargeNet(
     max_length=max_length,
     optim_lr=config["lr"],
     tr_args=config["tr_args"],
+    # loss_weights=loss_weights,
 )
 
 trainer = pl.Trainer(
@@ -69,7 +82,14 @@ trainer = pl.Trainer(
     precision=config["precision"],
     logger=pl.loggers.TensorBoardLogger("."),
     accumulate_grad_batches=config["accumulate_batches"],
+    callbacks=[
+        ModelCheckpoint(
+            dirpath="./model",
+            save_top_k=1,
+            monitor="validation_loss",
+            filename="{epoch}-{validation_loss:.3f}",
+        )
+    ],
 )
 
 trainer.fit(net, train_dataloaders=train_dl, val_dataloaders=valid_dl)
-trainer.save_checkpoint("model/latest.ckpt")
