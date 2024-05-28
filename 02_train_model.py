@@ -66,14 +66,10 @@ valid_dl = torch.utils.data.DataLoader(
     num_workers=config["n_workers"],
 )
 
-# Initialize network
-net = SequentialMargeNet(
-    morphers=morphers,
-    hidden_size=config["hidden_size"],
-    max_length=max_length,
-    optim_lr=config["lr"],
-    tr_args=config["tr_args"],
-    # loss_weights=loss_weights,
+file_prefix = (
+    ""
+    if config["checkpoint_path"] is None
+    else f"resumed_after_{config['epoch_offset']}-"
 )
 
 trainer = pl.Trainer(
@@ -87,9 +83,27 @@ trainer = pl.Trainer(
             dirpath="./model",
             save_top_k=1,
             monitor="validation_loss",
-            filename="{epoch}-{validation_loss:.3f}",
+            filename=file_prefix + "{epoch}-{validation_loss:.3f}",
         )
     ],
 )
+
+# Initialize network
+with trainer.init_module():
+
+    if config["checkpoint_path"] is None:
+        net = SequentialMargeNet(
+            morphers=morphers,
+            hidden_size=config["hidden_size"],
+            max_length=max_length,
+            optim_lr=config["lr"],
+            tr_args=config["tr_args"],
+            use_position_encoding=config["use_position_encoding"],
+        )
+        file_prefix = ""
+    else:
+        net = SequentialMargeNet.load_from_checkpoint(config["checkpoint_path"])
+        file_prefix = f"resumed_after_{config['epoch_offset']}-"
+
 
 trainer.fit(net, train_dataloaders=train_dl, val_dataloaders=valid_dl)

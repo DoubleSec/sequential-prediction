@@ -5,6 +5,8 @@ from torch import nn
 from torch.nn import functional as F
 import lightning.pytorch as pl
 
+from .cmlk import Transformer
+
 
 class BoringPositionalEncoding(nn.Module):
     """
@@ -125,6 +127,7 @@ class SequentialMargeNet(pl.LightningModule):
         max_length,
         optim_lr: float,
         tr_args: dict,
+        use_position_encoding: bool = True,
         loss_weights: dict = None,
     ):
         super().__init__()
@@ -139,26 +142,25 @@ class SequentialMargeNet(pl.LightningModule):
             hidden_size=hidden_size,
         )
 
-        self.position_embedder = BoringPositionalEncoding(
-            max_length=max_length, d_model=hidden_size
-        )
+        if use_position_encoding:
+            self.position_embedder = BoringPositionalEncoding(
+                max_length=max_length, d_model=hidden_size
+            )
+        else:
+            self.position_embedder = nn.Identity()
+
         self.input_norm = nn.GELU()
         self.register_buffer(
             "causal_mask",
             nn.Transformer.generate_square_subsequent_mask(max_length - 1),
         )
 
-        self.transformer = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(
-                d_model=hidden_size,
-                nhead=tr_args["nhead"],
-                dim_feedforward=tr_args["dim_feedforward"],
-                dropout=tr_args["dropout"],
-                activation="gelu",
-                batch_first=True,
-            ),
-            num_layers=tr_args["num_layers"],
+        self.transformer = Transformer(
+            n_layers=tr_args["n_layers"], layer_args=tr_args["layer_args"]
         )
+
+        # Initialize linear layers and embeddings, at least.
+        self.apply(self._init_weights)
 
         self.criteria = {
             col: morpher.make_criterion() for col, morpher in morphers.items()
@@ -183,12 +185,7 @@ class SequentialMargeNet(pl.LightningModule):
         tr_inputs = tr_inputs.sum(dim=-2)
         tr_inputs = self.input_norm(tr_inputs)
         tr_inputs = self.position_embedder(tr_inputs)
-        tr_outputs = self.transformer(
-            tr_inputs,
-            mask=self.causal_mask,
-            src_key_padding_mask=x["pad_mask"][:, :-1],
-            is_causal=True,
-        )
+        tr_outputs = self.transformer(tr_inputs, mask=self.causal_mask)
         predictions = self.generator_head(tr_outputs, x)
         return predictions
 
@@ -239,10 +236,14 @@ class SequentialMargeNet(pl.LightningModule):
         tr_inputs = tr_inputs.sum(dim=-2)
         tr_inputs = self.input_norm(tr_inputs)
         tr_inputs = self.position_embedder(tr_inputs)
-        tr_outputs = self.transformer(
-            tr_inputs,
-            mask=self.causal_mask[:input_length, :input_length],
-            is_causal=True,
-        )
+        tr_outputs = self.transformer(tr_inputs)
 
         return self.generator_head.generate(tr_outputs[:, -1, :], **kwargs)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)

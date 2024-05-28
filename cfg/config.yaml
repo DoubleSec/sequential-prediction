@@ -13,13 +13,15 @@ features:
   # - [pfx_z, numeric, {n_quantiles: 32}]
   # - [plate_x, numeric, {n_quantiles: 32}]
   # - [plate_z, numeric, {n_quantiles: 32}]
-  - [result_type, categorical, {}]
+  - [description, categorical, {}]
   - [events, categorical, {}]
   - [end_of_at_bat, categorical, {}]
   - [end_of_inning, categorical, {}]
   - [end_of_game, categorical, {}]
 
-
+# Optionally resume from a checkpoint
+checkpoint_path: null
+epoch_offset: null
 
 # job
 n_workers: 10
@@ -29,14 +31,17 @@ log_every_n: 3
 # Network spec
 precision: bf16-mixed
 hidden_size: 256
+use_position_encoding: false
 tr_args:
-  nhead: 8
-  dim_feedforward: 512
-  dropout: 0.1
-  num_layers: 4
+  n_layers: 6
+  layer_args:
+    d_model: 256
+    n_kv_heads: 8
+    n_q_heads: 8
+    ff_dim: 512
 
 # Learning dynamics
-max_epochs: 40
+max_epochs: 80
 lr: 0.0005
-batch_size: 128
-accumulate_batches: 4
+batch_size: 64
+accumulate_batches: 8
