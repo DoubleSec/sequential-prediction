@@ -39,6 +39,10 @@ tr_args:
     n_kv_heads: 8
     n_q_heads: 8
     ff_dim: 512
+  use_relative_position_bias: true
+  position_bias_args:
+    n_buckets: 32
+    max_distance: 128
 
 # Learning dynamics
 max_epochs: 80

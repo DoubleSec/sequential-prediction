@@ -127,7 +127,6 @@ class SequentialMargeNet(pl.LightningModule):
         max_length,
         optim_lr: float,
         tr_args: dict,
-        use_position_encoding: bool = True,
         loss_weights: dict = None,
     ):
         super().__init__()
@@ -142,13 +141,6 @@ class SequentialMargeNet(pl.LightningModule):
             hidden_size=hidden_size,
         )
 
-        if use_position_encoding:
-            self.position_embedder = BoringPositionalEncoding(
-                max_length=max_length, d_model=hidden_size
-            )
-        else:
-            self.position_embedder = nn.Identity()
-
         self.input_norm = nn.GELU()
         self.register_buffer(
             "causal_mask",
@@ -156,7 +148,10 @@ class SequentialMargeNet(pl.LightningModule):
         )
 
         self.transformer = Transformer(
-            n_layers=tr_args["n_layers"], layer_args=tr_args["layer_args"]
+            n_layers=tr_args["n_layers"],
+            layer_args=tr_args["layer_args"],
+            use_relative_position_bias=tr_args["use_relative_position_bias"],
+            position_bias_args=tr_args["position_bias_args"],
         )
 
         # Initialize linear layers and embeddings, at least.
@@ -184,7 +179,6 @@ class SequentialMargeNet(pl.LightningModule):
         # n x s-1 x e
         tr_inputs = tr_inputs.sum(dim=-2)
         tr_inputs = self.input_norm(tr_inputs)
-        tr_inputs = self.position_embedder(tr_inputs)
         tr_outputs = self.transformer(tr_inputs, mask=self.causal_mask)
         predictions = self.generator_head(tr_outputs, x)
         return predictions
@@ -235,7 +229,6 @@ class SequentialMargeNet(pl.LightningModule):
         # n x s-1 x e
         tr_inputs = tr_inputs.sum(dim=-2)
         tr_inputs = self.input_norm(tr_inputs)
-        tr_inputs = self.position_embedder(tr_inputs)
         tr_outputs = self.transformer(tr_inputs)
 
         return self.generator_head.generate(tr_outputs[:, -1, :], **kwargs)

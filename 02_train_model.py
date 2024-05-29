@@ -98,7 +98,6 @@ with trainer.init_module():
             max_length=max_length,
             optim_lr=config["lr"],
             tr_args=config["tr_args"],
-            use_position_encoding=config["use_position_encoding"],
         )
         file_prefix = ""
     else:
