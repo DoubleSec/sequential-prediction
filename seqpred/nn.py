@@ -150,8 +150,8 @@ class SequentialMargeNet(pl.LightningModule):
         self.transformer = Transformer(
             n_layers=tr_args["n_layers"],
             layer_args=tr_args["layer_args"],
-            use_relative_position_bias=tr_args["use_relative_position_bias"],
-            position_bias_args=tr_args["position_bias_args"],
+            position_encoding=tr_args["position_encoding"],
+            attn_args=tr_args["attn_args"],
         )
 
         # Initialize linear layers and embeddings, at least.
@@ -189,7 +189,8 @@ class SequentialMargeNet(pl.LightningModule):
         loss_dict = {
             f"train_{col}_loss": (
                 criterion(preds[col], x[col][:, 1:]) * loss_mask[:, 1:]
-            ).mean()
+            ).sum()
+            / loss_mask.sum()
             for col, criterion in self.criteria.items()
         }
         self.log_dict(loss_dict)
@@ -210,7 +211,8 @@ class SequentialMargeNet(pl.LightningModule):
         loss_dict = {
             f"validation_{col}_loss": (
                 criterion(preds[col], x[col][:, 1:]) * loss_mask[:, 1:]
-            ).mean()
+            ).sum()
+            / loss_mask.sum()
             for col, criterion in self.criteria.items()
         }
         self.log_dict(loss_dict)

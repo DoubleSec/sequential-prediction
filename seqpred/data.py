@@ -25,14 +25,17 @@ def pad_tensor_dict(tensor_dict, max_length, return_mask: bool = True):
     """
 
     init_length = next(iter(tensor_dict.values())).shape[0]
-    padded_tensor_dict = {
-        k: torch.nn.functional.pad(v, [0, max_length - init_length], value=0)
-        for k, v in tensor_dict.items()
-    }
+    if init_length >= max_length:
+        padded_tensor_dict = {k: v[:max_length] for k, v in tensor_dict.items()}
+    else:
+        padded_tensor_dict = {
+            k: torch.nn.functional.pad(v, [0, max_length - init_length], value=0)
+            for k, v in tensor_dict.items()
+        }
     # FALSE IS NOT PAD, TRUE IS PAD
     if return_mask:
         pad_mask = torch.ones([max_length], dtype=torch.bool)
-        pad_mask[:init_length] = False
+        pad_mask[: min(init_length, max_length)] = False
         pad_mask = torch.where(pad_mask, float("-inf"), 0.0)
         return padded_tensor_dict, pad_mask
     else:

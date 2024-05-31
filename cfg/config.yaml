@@ -24,6 +24,7 @@ checkpoint_path: null
 epoch_offset: null
 
 # job
+max_length: 384
 n_workers: 10
 # Multiply by accumulate_batches to get actual rate.
 log_every_n: 3
@@ -31,18 +32,17 @@ log_every_n: 3
 # Network spec
 precision: bf16-mixed
 hidden_size: 256
-use_position_encoding: false
 tr_args:
-  n_layers: 6
+  n_layers: 4
   layer_args:
     d_model: 256
-    n_kv_heads: 8
-    n_q_heads: 8
     ff_dim: 512
-  use_relative_position_bias: true
-  position_bias_args:
-    n_buckets: 32
-    max_distance: 128
+  position_encoding: cope
+  attn_args:
+    n_q_heads: 8
+    n_kv_heads: 8
+    cope_args:
+      n_positions: 32
 
 # Learning dynamics
 max_epochs: 80

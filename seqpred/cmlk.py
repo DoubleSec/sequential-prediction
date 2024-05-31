@@ -91,6 +91,41 @@ class RelativePositionBias(nn.Module):
         return x + biases
 
 
+class CoPE(nn.Module):
+
+    def __init__(
+        self,
+        n_positions: int,
+        n_heads: int,
+        input_dim: int,
+    ):
+        super().__init__()
+        self.n_positions = n_positions
+        # Really awkward initialization
+        # h x e x np
+        self.position_emb = nn.Parameter(
+            torch.randn([1, n_heads, input_dim, n_positions]) * 0.02
+        )
+
+    def forward(self, q, attn_logits):
+
+        # Attention logits are n x h x s x s
+        gates = torch.sigmoid(attn_logits)
+        # Cumsum starting from the right instead of the left.
+        # Now n x h x s x s
+        pos = gates.flip(-1).cumsum(dim=-1).flip(-1)
+        pos = pos.clamp(max=self.n_positions - 1)
+        pos_ceil = pos.ceil().long()
+        pos_floor = pos.floor().long()
+        # (n, h, s, e) * (1, h, e, np) = (n, h, s, np)
+        logits_int = q @ self.position_emb
+        # n x h x s x s
+        logits_ceil = logits_int.gather(dim=-1, index=pos_ceil)
+        logits_floor = logits_int.gather(dim=-1, index=pos_floor)
+        w = pos - pos_floor
+        return attn_logits + (logits_ceil * w + logits_floor * (1 - w))
+
+
 class GroupedQueryAttention(nn.Module):
 
     def __init__(
@@ -99,6 +134,7 @@ class GroupedQueryAttention(nn.Module):
         n_kv_heads: int,
         n_q_heads: int,
         position_bias: nn.Module,
+        **_,
     ):
         super().__init__()
         self.n_kv_heads = n_kv_heads
@@ -122,12 +158,7 @@ class GroupedQueryAttention(nn.Module):
         self.wv = nn.Linear(self.input_dim, self.n_kv_heads * self.head_dim, bias=False)
         self.wo = nn.Linear(self.input_dim, self.input_dim, bias=False)
 
-    def forward(self, x, mask=None):
-        """Mask is additive ONLY."""
-
-        # x is (n x s x e)
-        batch_size, seq_len, _ = x.shape
-
+    def _create_qkv(self, x, batch_size, seq_len):
         xq = self.wq(x).view(batch_size, seq_len, self.n_q_heads, self.head_dim)
         xk = self.wk(x).view(batch_size, seq_len, self.n_kv_heads, self.head_dim)
         xv = self.wv(x).view(batch_size, seq_len, self.n_kv_heads, self.head_dim)
@@ -138,21 +169,80 @@ class GroupedQueryAttention(nn.Module):
         exp_k = torch.repeat_interleave(xk, self.n_rep, dim=2).transpose(1, 2)
         exp_v = torch.repeat_interleave(xv, self.n_rep, dim=2).transpose(1, 2)
 
+        return xq, exp_k, exp_v
+
+    def _calculate_qv_logits(self, q, k):
+        return torch.matmul(q, k.transpose(2, 3)) / math.sqrt(self.head_dim)
+
+    def _calculate_attn(self, attn_logits, v):
+        # n x h x s x s
+        attn_logits = F.softmax(attn_logits, dim=-1)
+        # n x h x s x e
+        return torch.matmul(attn_logits, v)
+
+    def forward(self, x, mask=None):
+        """Mask is additive ONLY."""
+
+        # x is (n x s x e)
+        batch_size, seq_len, _ = x.shape
+
+        xq, exp_k, exp_v = self._create_qkv(x, batch_size, seq_len)
+
         # This is Scaled Dot-Product Attention
-        attn_scores = torch.matmul(xq, exp_k.transpose(2, 3)) / math.sqrt(self.head_dim)
+        # n x h x s x s
+        attn_logits = self._calculate_qv_logits(xq, exp_k)
 
         # Apply relative position biases if needed
-        attn_scores = self.position_bias(attn_scores)
+        attn_logits = self.position_bias(attn_logits)
 
         if mask is not None:
-            attn_scores = attn_scores + mask
+            attn_logits = attn_logits + mask
 
-        # n x h x s x s
-        attn_scores = F.softmax(attn_scores, dim=-1)
-        # n x h x s x e
-        output = torch.matmul(attn_scores, exp_v)
         # n x s x (h x e)
-        output = output.transpose(1, 2).contiguous().view(batch_size, seq_len, -1)
+        output = (
+            self._calculate_attn(attn_logits, exp_v)
+            .transpose(1, 2)
+            .contiguous()
+            .view(batch_size, seq_len, -1)
+        )
+
+        # n x s x input_size
+        return self.wo(output)
+
+
+class CopeGroupedQueryAttn(GroupedQueryAttention):
+    def __init__(
+        self,
+        cope_args: dict,
+        **kwargs,
+    ):
+        super().__init__(position_bias=nn.Identity, **kwargs)
+        self.cope_layer = CoPE(
+            **cope_args, n_heads=kwargs["n_q_heads"], input_dim=self.head_dim
+        )
+
+    def forward(self, x, mask=None):
+        # x is (n x s x e)
+        batch_size, seq_len, _ = x.shape
+
+        xq, exp_k, exp_v = self._create_qkv(x, batch_size, seq_len)
+
+        # This is Scaled Dot-Product Attention
+        attn_logits = self._calculate_qv_logits(xq, exp_k)
+
+        # Apply CoPE position biases
+        attn_logits = self.cope_layer(xq, attn_logits)
+        if mask is not None:
+            attn_logits = attn_logits + mask
+
+        # n x s x (h x e)
+        output = (
+            self._calculate_attn(attn_logits, exp_v)
+            .transpose(1, 2)
+            .contiguous()
+            .view(batch_size, seq_len, -1)
+        )
+
         # n x s x input_size
         return self.wo(output)
 
@@ -162,24 +252,15 @@ class TransformerLayer(nn.Module):
     def __init__(
         self,
         d_model,
-        n_kv_heads,
-        n_q_heads,
         ff_dim,
-        position_bias: nn.Module,
+        attention_module: nn.Module,
     ):
         super().__init__()
 
         self.input_dim = d_model
-        self.n_kv_heads = n_kv_heads
-        self.n_q_heads = n_q_heads
         self.ff_dim = ff_dim
 
-        self.gq_attn = GroupedQueryAttention(
-            input_dim=self.input_dim,
-            n_kv_heads=self.n_kv_heads,
-            n_q_heads=self.n_q_heads,
-            position_bias=position_bias,
-        )
+        self.gq_attn = attention_module
         self.attn_norm = RMSNorm(d_model)
         self.linear_norm = RMSNorm(d_model)
         self.swiglu = SwiGLU(d_model, ff_dim)
@@ -201,25 +282,63 @@ class Transformer(nn.Module):
         self,
         n_layers: int,
         layer_args: dict,
-        use_relative_position_bias: bool = False,
-        position_bias_args: dict = {},
+        position_encoding: str,
+        attn_args: dict,
     ):
         super().__init__()
 
-        if use_relative_position_bias:
+        self.position_encoding = position_encoding
+
+        if self.position_encoding == "t5":
             self.position_biases = RelativePositionBias(
-                **position_bias_args,
-                n_heads=layer_args["n_q_heads"],
+                **attn_args["t5_args"],
+                n_heads=attn_args["n_q_heads"],
+            )
+            self.transformer_layers = nn.ModuleList(
+                [
+                    TransformerLayer(
+                        **layer_args,
+                        attention_module=GroupedQueryAttention(
+                            input_dim=layer_args["d_model"],
+                            **attn_args,
+                            position_bias=self.position_biases,
+                        ),
+                    )
+                    for _ in range(n_layers)
+                ]
+            )
+        elif self.position_encoding == "cope":
+            self.transformer_layers = nn.ModuleList(
+                [
+                    TransformerLayer(
+                        **layer_args,
+                        attention_module=CopeGroupedQueryAttn(
+                            input_dim=layer_args["d_model"],
+                            **attn_args,
+                        ),
+                    )
+                    for _ in range(n_layers)
+                ]
+            )
+        elif self.position_encoding == "nope":
+            self.position_biases = nn.Identity()
+            self.transformer_layers = nn.ModuleList(
+                [
+                    TransformerLayer(
+                        **layer_args,
+                        attention_module=GroupedQueryAttention(
+                            input_dim=layer_args["d_model"],
+                            **attn_args,
+                            position_bias=self.position_biases,
+                        ),
+                    )
+                    for _ in range(n_layers)
+                ]
             )
         else:
-            self.position_biases = nn.Identity()
-
-        self.transformer_layers = nn.ModuleList(
-            [
-                TransformerLayer(**layer_args, position_bias=self.position_biases)
-                for _ in range(n_layers)
-            ]
-        )
+            raise ValueError(
+                f"position_encoding must be one of ['t5', 'cope', 'nope'], got {self.position_encoding}"
+            )
 
     def forward(self, x, mask=None):
         for layer in self.transformer_layers:
