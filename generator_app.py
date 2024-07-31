@@ -6,7 +6,7 @@ import polars as pl
 from morphers.base.categorical import Integerizer
 import streamlit as st
 
-checkpoint_path = "./model/epoch=54-validation_loss=1.596.ckpt"
+checkpoint_path = "./model/epoch=59-validation_loss=2.995.ckpt"
 data_files = ["./data/2023_data.parquet"]
 
 st.set_page_config(page_title="Generation Tester", layout="wide")
