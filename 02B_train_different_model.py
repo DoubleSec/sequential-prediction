@@ -5,10 +5,8 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from morphers.polars.continuous import PolarsQuantiler
 from morphers.polars.categorical import PolarsIntegerizer
 
-from seqpred.data import prep_data, BaseDataset
+from seqpred.data import prep_one_feature_data, BaseDataset
 from seqpred.nn import SequentialMargeNet
-
-from seqpred.diag import MemoryMonitorCallback
 
 torch.set_float32_matmul_precision("medium")
 
@@ -17,34 +15,15 @@ with open("cfg/config.yaml", "r") as f:
 
 input_files = [config["train_data_path"]]
 
-morpher_dispatch = {
-    "numeric": PolarsQuantiler,
-    "categorical": PolarsIntegerizer,
-}
-
-inputs = {
-    col: (morpher_dispatch[tp], kwargs) for [col, tp, kwargs] in config["features"]
-}
-# Loss weighting, according to inverse of feature rank
-n_features = len(config["features"])
-print(f"n_features: {n_features}")
-# So they still sum to one.
-weight_multiplier = n_features / (n_features - (n_features - 1) * 0.5)
-loss_weights = {
-    ls[0]: ((n_features - i) / n_features) * weight_multiplier
-    for i, ls in enumerate(config["features"])
-}
-
 # Set up data
-base_data, morphers = prep_data(
+base_data, morphers = prep_one_feature_data(
     data_files=input_files,
     group_by=["game_pk", "at_bat_number"],
-    rename=config["rename"],
-    cols=inputs,
+    morpher_class=PolarsIntegerizer,
 )
 
 morpher_states = {col: morpher.save_state_dict() for col, morpher in morphers.items()}
-with open("model/morphers.yaml", "w") as f:
+with open("model/one_feature_morphers.yaml", "w") as f:
     yaml.dump(morpher_states, f)
 
 ds = BaseDataset(

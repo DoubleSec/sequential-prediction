@@ -44,11 +44,12 @@ def pad_tensor_dict(tensor_dict, max_length, return_mask: bool = True):
 
 def prep_data(
     data_files: str,
-    rename: dict = None,
-    cols: dict = None,
-    morphers: dict = None,
-    data_output: str = None,
-    morpher_output: str = None,
+    group_by: list,
+    rename: dict | None = None,
+    cols: dict | None = None,
+    morphers: dict | None = None,
+    data_output: str | None = None,
+    morpher_output: str | None = None,
     write: bool = False,
 ):
     """Prepare data according to a morpher dict.
@@ -104,7 +105,7 @@ def prep_data(
             ],
         )
         .sort(["at_bat_number", "pitch_number"])
-        .group_by("game_pk", maintain_order=True)
+        .group_by(group_by, maintain_order=True)
         .agg(
             *[pl.col(feature) for feature in morphers.keys()],
             n_pitches=pl.col("pitch_number").count(),
@@ -122,17 +123,70 @@ def prep_data(
     return input_data, morphers
 
 
+def prep_one_feature_data(
+    data_files: str,
+    group_by: list,
+    morphers: dict | None = None,
+    morpher_class=None,
+):
+    """Prepare dataset with only one feature, description (strike, ball, etc.)
+    Also adds a start of sequence and end of sequence token."""
+
+    input_dataframes = [pl.read_parquet(file) for file in data_files]
+    input_data = pl.concat(input_dataframes)
+
+    # Use existing morpher states
+    if morphers is None:
+        vocab = (
+            input_data["description"]
+            .filter(input_data["description"].is_not_null())
+            .unique()
+            .to_list()
+        )
+        vocab += ["start_of_pa", "end_of_pa"]
+        morphers = {"description": morpher_class({t: i for i, t in enumerate(vocab)})}
+    else:
+        morphers = morphers
+
+    input_data = (
+        input_data.select(
+            "game_pk",
+            "at_bat_number",
+            "pitch_number",
+            # morphed inputs
+            morphers["description"](
+                morphers["description"].fill_missing(pl.col("description"))
+            ).alias("description"),
+        )
+        .sort(["at_bat_number", "pitch_number"])
+        .group_by(group_by, maintain_order=True)
+        .agg(
+            *[pl.col(feature) for feature in morphers.keys()],
+            n_pitches=pl.col("pitch_number").count(),
+        )
+        .with_columns(
+            description=pl.lit([morphers["description"].vocab["start_of_pa"]])
+            .list.concat(pl.col("description"))
+            .list.concat(pl.lit([morphers["description"].vocab["end_of_pa"]]))
+        )
+    )
+
+    return input_data, morphers
+
+
 class BaseDataset(torch.utils.data.Dataset):
 
     def __init__(
         self,
         ds: pl.DataFrame,
+        keys: list,
         morphers: dict,
         max_length: int,
     ):
 
         super().__init__()
         self.ds = ds
+        self.keys = keys
         self.morphers = morphers
         self.max_length = max_length
 
@@ -149,5 +203,6 @@ class BaseDataset(torch.utils.data.Dataset):
             max_length=self.max_length,
         )
 
-        inputs |= {"game_pk": row["game_pk"], "pad_mask": pad_mask}
+        inputs |= {key: row[key] for key in self.keys}
+        inputs |= {"pad_mask": pad_mask}
         return inputs

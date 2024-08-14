@@ -3,41 +3,33 @@ train_data_path: ./data/all_data.parquet
 rename:
   type: result_type
 
+keys:
+  - game_pk
+  - at_bat_number
+
 features:
-  - [pitcher, categorical, {}]
-  - [batter, categorical, {}]
-  # - [stand, categorical, {}]
-  # - [pitch_name, categorical, {}]
-  # - [release_speed, numeric, {n_quantiles: 32}]
-  # - [pfx_x, numeric, {n_quantiles: 32}]
-  # - [pfx_z, numeric, {n_quantiles: 32}]
-  # - [plate_x, numeric, {n_quantiles: 32}]
-  # - [plate_z, numeric, {n_quantiles: 32}]
   - [description, categorical, {}]
-  - [events, categorical, {}]
-  - [end_of_at_bat, categorical, {}]
-  - [end_of_inning, categorical, {}]
-  - [end_of_game, categorical, {}]
+  # - [end_of_at_bat, categorical, {}]
 
 # Optionally resume from a checkpoint
 checkpoint_path: null
 epoch_offset: null
 
 # job
-max_length: 384
+max_length: 20
 n_workers: 10
 # Multiply by accumulate_batches to get actual rate.
 log_every_n: 3
 
 # Network spec
 precision: bf16-mixed
-hidden_size: 256
+hidden_size: 64
 tr_args:
   n_layers: 4
   layer_args:
-    d_model: 256
-    ff_dim: 512
-  position_encoding: cope
+    d_model: 64
+    ff_dim: 128
+  position_encoding: nope
   attn_args:
     n_q_heads: 8
     n_kv_heads: 8
@@ -45,7 +37,7 @@ tr_args:
       n_positions: 32
 
 # Learning dynamics
-max_epochs: 80
+max_epochs: 30
 lr: 0.0005
-batch_size: 64
-accumulate_batches: 8
+batch_size: 2048
+accumulate_batches: 1

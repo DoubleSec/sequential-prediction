@@ -108,7 +108,7 @@ class CoPE(nn.Module):
         )
 
     def forward(self, q, attn_logits):
-
+        # NOTE: This should recieve MASKED attention logits
         # Attention logits are n x h x s x s
         gates = torch.sigmoid(attn_logits)
         # Cumsum starting from the right instead of the left.
@@ -231,9 +231,9 @@ class CopeGroupedQueryAttn(GroupedQueryAttention):
         attn_logits = self._calculate_qv_logits(xq, exp_k)
 
         # Apply CoPE position biases
-        attn_logits = self.cope_layer(xq, attn_logits)
         if mask is not None:
             attn_logits = attn_logits + mask
+        attn_logits = self.cope_layer(xq, attn_logits)
 
         # n x s x (h x e)
         output = (

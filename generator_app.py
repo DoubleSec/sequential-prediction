@@ -1,4 +1,4 @@
-from seqpred.data import prep_data, BaseDataset
+from seqpred.data import prep_one_feature_data, BaseDataset
 from seqpred.nn import SequentialMargeNet
 import yaml
 import torch
@@ -6,7 +6,7 @@ import polars as pl
 from morphers.base.categorical import Integerizer
 import streamlit as st
 
-checkpoint_path = "./model/epoch=59-validation_loss=2.995.ckpt"
+checkpoint_path = "./model/epoch=16-validation_loss=1.086.ckpt"
 data_files = ["./data/2023_data.parquet"]
 
 st.set_page_config(page_title="Generation Tester", layout="wide")
@@ -18,6 +18,9 @@ def unmorph(pitches, morphers):
         if isinstance(morphers[pk], Integerizer):
             reverse_vocab = {v: k for k, v in morphers[pk].vocab.items()}
             vector = pv.tolist()
+            # If there's only one feature
+            if not isinstance(vector, list):
+                vector = [vector]
             unmorphed_pitches[pk] = [reverse_vocab.get(item, "-") for item in vector]
         else:
             raise NotImplementedError("Later")
@@ -34,13 +37,14 @@ def load_model_and_data(config_path, checkpoint_path, data_path):
 
     morpher_dict = model.hparams["morphers"]
 
-    data, morphers = prep_data(
+    data, morphers = prep_one_feature_data(
         data_files=data_path,
-        rename=config["rename"],
+        group_by=["game_pk", "at_bat_number"],
         morphers=morpher_dict,
     )
     ds = BaseDataset(
         data,
+        config["keys"],
         morpher_dict,
         model.hparams["max_length"],
     )
@@ -57,7 +61,8 @@ config, model, morpher_dict, ds = load_model_and_data(
 with st.sidebar:
     game_index = st.number_input("Game Index", 0, len(ds) - 1)
     example = ds[game_index]
-    after_n_pitches = st.slider("After N Pitches", 1, 200, value=100)
+    # after_n_pitches = st.slider("After N Pitches", 1, 200, value=100)
+    after_n_pitches = 1
     max_to_generate = st.slider("Max to Generate", 0, 300, value=300)
     temperature = st.slider("Generation Temperature", 0.0, 10.0, value=1.0, step=0.1)
     if st.button("Re-run"):
@@ -66,7 +71,7 @@ with st.sidebar:
 with torch.inference_mode():
     # noooooooo
     inning_mask = (
-        torch.arange(example["end_of_inning"].shape[0]) < after_n_pitches
+        torch.arange(example["description"].shape[0]) < after_n_pitches
     ) & ~torch.isinf(example["pad_mask"])
 
     x = {
@@ -74,7 +79,6 @@ with torch.inference_mode():
         for k, v in example.items()
         if isinstance(v, torch.Tensor)
     }
-
     n_generated = None
     for i in range(max_to_generate):
         generated_pitch = model.generate_one(x, temperature=temperature)
@@ -83,9 +87,13 @@ with torch.inference_mode():
             for k, v in x.items()
             if k != "pad_mask"
         }
-        if generated_pitch["end_of_game"].item() == 1:
+        print(x)
+        if (
+            generated_pitch["description"].item()
+            == morpher_dict["description"].vocab["end_of_pa"]
+        ):
             n_generated = i + 1
-            print(f"Reached end of game: generated {i+1} pitches")
+            print(f"Reached end of at-bat: generated {i+1} pitches")
             break
 
     context = {k: v[:, :after_n_pitches] for k, v in x.items()}
