@@ -19,7 +19,7 @@ epoch_offset: null
 max_length: 20
 n_workers: 10
 # Multiply by accumulate_batches to get actual rate.
-log_every_n: 3
+log_every_n: 20
 
 # Network spec
 precision: bf16-mixed
@@ -29,15 +29,15 @@ tr_args:
   layer_args:
     d_model: 64
     ff_dim: 128
-  position_encoding: nope
+  position_encoding: cope
   attn_args:
     n_q_heads: 8
     n_kv_heads: 8
     cope_args:
-      n_positions: 32
+      n_positions: 8
 
 # Learning dynamics
-max_epochs: 30
-lr: 0.0005
-batch_size: 2048
+max_epochs: 5
+lr: 0.0002
+batch_size: 4096
 accumulate_batches: 1

@@ -3,10 +3,12 @@ from seqpred.nn import SequentialMargeNet
 import yaml
 import torch
 import polars as pl
+import seaborn as sns
+from matplotlib import pyplot as plt
 from morphers.base.categorical import Integerizer
 import streamlit as st
 
-checkpoint_path = "./model/epoch=16-validation_loss=1.086.ckpt"
+checkpoint_path = "./model/epoch=29-validation_loss=1.085.ckpt"
 data_files = ["./data/2023_data.parquet"]
 
 st.set_page_config(page_title="Generation Tester", layout="wide")
@@ -81,7 +83,9 @@ with torch.inference_mode():
     }
     n_generated = None
     for i in range(max_to_generate):
-        generated_pitch = model.generate_one(x, temperature=temperature)
+        generated_pitch = model.generate_one(
+            x, keep_attention=True, temperature=temperature
+        )
         x = {
             k: torch.cat([v, generated_pitch[k].unsqueeze(0)], dim=1)
             for k, v in x.items()
@@ -99,6 +103,18 @@ with torch.inference_mode():
     context = {k: v[:, :after_n_pitches] for k, v in x.items()}
     generated = {k: v[:, after_n_pitches:] for k, v in x.items()}
 
+    # Get attention activations.
+    attention_activation = (
+        torch.nn.functional.softmax(
+            model.transformer.transformer_layers[
+                0
+            ].gq_attn.attention_activation.squeeze(0),
+            dim=2,
+        )
+        .mean(dim=0)[-1, :]
+        .reshape(-1)
+    )
+
 context_df = pl.DataFrame(
     unmorph(
         {k: v.squeeze().cpu().numpy() for k, v in context.items()},
@@ -111,6 +127,13 @@ generated_df = pl.DataFrame(
         morpher_dict,
     )
 )
+
+all_descriptions = pl.concat([context_df, generated_df])["description"][:-1]
+chart_df = {
+    "Event": all_descriptions,
+    "Attention": attention_activation.cpu().numpy(),
+}
+st.bar_chart(chart_df, y="Attention", color="Event")
 
 with st.sidebar:
     if n_generated is not None:

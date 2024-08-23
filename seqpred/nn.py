@@ -8,6 +8,12 @@ import lightning.pytorch as pl
 from .cmlk import Transformer
 
 
+def log_dict_step(logger, metric_dict, global_step):
+
+    for k, v in metric_dict.items():
+        logger.experiment.add_scalar(k, v, global_step=global_step)
+
+
 class BoringPositionalEncoding(nn.Module):
     """
     Shamelessly "adapted" from a torch tutorial
@@ -135,6 +141,8 @@ class SequentialMargeNet(pl.LightningModule):
         self.max_length = max_length
         self.loss_weights = loss_weights
 
+        self.global_log_step = 0
+
         # This also includes input embedding layers.
         self.generator_head = SumMarginalHead(
             morphers={col: morpher for col, morpher in morphers.items()},
@@ -193,7 +201,9 @@ class SequentialMargeNet(pl.LightningModule):
             / loss_mask.sum()
             for col, criterion in self.criteria.items()
         }
-        self.log_dict(loss_dict)
+        self.global_log_step += loss_mask.shape[0]
+        log_dict_step(self.logger, loss_dict, self.global_log_step)
+
         if self.loss_weights is not None:
             losses = [
                 loss_dict[f"train_{col}_loss"] * self.loss_weights[col]
@@ -202,7 +212,7 @@ class SequentialMargeNet(pl.LightningModule):
         else:
             losses = loss_dict.values()
         total_loss = sum(losses)
-        self.log("train_loss", total_loss)
+        log_dict_step(self.logger, {"train_loss": total_loss}, self.global_log_step)
         return total_loss
 
     def validation_step(self, x):
@@ -215,23 +225,29 @@ class SequentialMargeNet(pl.LightningModule):
             / loss_mask.sum()
             for col, criterion in self.criteria.items()
         }
-        self.log_dict(loss_dict)
+        log_dict_step(self.logger, loss_dict, self.global_log_step)
         total_loss = sum(loss_dict.values())
-        self.log("validation_loss", total_loss)
+        log_dict_step(
+            self.logger, {"validation_loss": total_loss}, self.global_log_step
+        )
+        self.log("validation_loss", total_loss, logger=False)
         return total_loss
 
-    def generate_one(self, x, **kwargs):
+    def generate_one(self, x, keep_attention: bool = False, **kwargs):
         """Generate a pitch.
 
         - x is an initial set of pitches
         - kwargs are keyword arguments for the morphers' generate methods"""
 
         tr_inputs = self.generator_head.embed_inputs(x)
-        input_length = tr_inputs.shape[1]
+
         # n x s-1 x e
         tr_inputs = tr_inputs.sum(dim=-2)
         tr_inputs = self.input_norm(tr_inputs)
-        tr_outputs = self.transformer(tr_inputs)
+        mask = self.causal_mask[: tr_inputs.shape[1], : tr_inputs.shape[1]]
+        tr_outputs = self.transformer(
+            tr_inputs, mask=mask, keep_attention=keep_attention
+        )
 
         return self.generator_head.generate(tr_outputs[:, -1, :], **kwargs)
 

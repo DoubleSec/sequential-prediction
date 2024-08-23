@@ -221,7 +221,7 @@ class CopeGroupedQueryAttn(GroupedQueryAttention):
             **cope_args, n_heads=kwargs["n_q_heads"], input_dim=self.head_dim
         )
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask=None, keep_attention: bool = False):
         # x is (n x s x e)
         batch_size, seq_len, _ = x.shape
 
@@ -234,6 +234,9 @@ class CopeGroupedQueryAttn(GroupedQueryAttention):
         if mask is not None:
             attn_logits = attn_logits + mask
         attn_logits = self.cope_layer(xq, attn_logits)
+
+        if keep_attention:
+            self.attention_activation = attn_logits.detach()
 
         # n x s x (h x e)
         output = (
@@ -266,10 +269,12 @@ class TransformerLayer(nn.Module):
         self.swiglu = SwiGLU(d_model, ff_dim)
         self.linear = nn.Linear(ff_dim, d_model)
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask=None, keep_attention: bool = False):
 
         # Self attention
-        a = x + self.gq_attn(self.attn_norm(x), mask=mask)
+        a = x + self.gq_attn(
+            self.attn_norm(x), mask=mask, keep_attention=keep_attention
+        )
         # Linear layers
         h = self.swiglu(self.linear_norm(a))
         h = self.linear(h)
@@ -340,9 +345,9 @@ class Transformer(nn.Module):
                 f"position_encoding must be one of ['t5', 'cope', 'nope'], got {self.position_encoding}"
             )
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask=None, keep_attention: bool = False):
         for layer in self.transformer_layers:
-            x = layer(x, mask)
+            x = layer(x, mask, keep_attention=keep_attention)
 
         return x
 
