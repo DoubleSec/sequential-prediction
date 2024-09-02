@@ -2,13 +2,11 @@ import yaml
 import torch
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
-from morphers.polars.continuous import PolarsQuantiler
-from morphers.polars.categorical import PolarsIntegerizer
+from morphers import Quantiler
+from morphers import Integerizer
 
 from seqpred.data import prep_data, BaseDataset
 from seqpred.nn import SequentialMargeNet
-
-from seqpred.diag import MemoryMonitorCallback
 
 torch.set_float32_matmul_precision("medium")
 
@@ -18,8 +16,8 @@ with open("cfg/config.yaml", "r") as f:
 input_files = [config["train_data_path"]]
 
 morpher_dispatch = {
-    "numeric": PolarsQuantiler,
-    "categorical": PolarsIntegerizer,
+    "numeric": Quantiler,
+    "categorical": Integerizer,
 }
 
 inputs = {
