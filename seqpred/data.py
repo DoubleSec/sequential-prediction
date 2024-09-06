@@ -50,6 +50,7 @@ def prep_data(
     morphers: dict | None = None,
     data_output: str | None = None,
     morpher_output: str | None = None,
+    extra_labels: dict = {},
     write: bool = False,
 ):
     """Prepare data according to a morpher dict.
@@ -66,7 +67,8 @@ def prep_data(
         input_data.with_columns(
             pl.concat_str(
                 pl.col("inning"), pl.col("inning_topbot"), separator="-"
-            ).alias("complete_inning")
+            ).alias("complete_inning"),
+            *[pl.col(k).alias(v) for k, v in extra_labels.items()],
         )
         .sort(["game_pk", "at_bat_number", "pitch_number"])
         .with_columns(
@@ -98,6 +100,7 @@ def prep_data(
             "game_pk",
             "at_bat_number",
             "pitch_number",
+            *list(extra_labels.values()),
             # morphed inputs
             *[
                 morpher(morpher.fill_missing(pl.col(feature))).alias(feature)
@@ -105,7 +108,7 @@ def prep_data(
             ],
         )
         .sort(["at_bat_number", "pitch_number"])
-        .group_by(group_by, maintain_order=True)
+        .group_by(group_by + list(extra_labels.values()), maintain_order=True)
         .agg(
             *[pl.col(feature) for feature in morphers.keys()],
             n_pitches=pl.col("pitch_number").count(),

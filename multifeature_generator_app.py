@@ -39,20 +39,20 @@ markers = {
     "4-Seam Fastball": "o",
     "Changeup": "D",
     "Curveball": "v",
-    "Cutter": "<",
+    "Cutter": ">",
     "Eephus": "P",
     "Forkball": "D",
     "Knuckle Curve": "v",
     "Knuckleball": "P",
     "Other": "P",
     "Pitch Out": "P",
-    "Screwball": ">",
+    "Screwball": "<",
     "Sinker": "o",
-    "Slider": "<",
+    "Slider": ">",
     "Slow Curve": "v",
-    "Slurve": "<",
+    "Slurve": ">",
     "Split-Finger": "D",
-    "Sweeper": "<",
+    "Sweeper": ">",
 }
 
 
@@ -111,7 +111,7 @@ config, model, morpher_dict, ds = load_model_and_data(
 )
 
 with st.sidebar:
-    pitch_index = st.number_input("Pitch Index", 0, len(ds) - 1)
+    pitch_index = st.number_input("Plate Appearance Index", 0, len(ds) - 1)
     example = ds[pitch_index]
     after_n_pitches = 1
     temperature = st.slider("Generation Temperature", 0.0, 10.0, value=1.0, step=0.1)
