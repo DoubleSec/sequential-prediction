@@ -20,6 +20,11 @@ morpher_dispatch = {
     "categorical": Integerizer,
 }
 
+fixed_inputs = {
+    col: (morpher_dispatch[tp], kwargs)
+    for [col, tp, kwargs] in config["fixed_features"]
+}
+
 inputs = {
     col: (morpher_dispatch[tp], kwargs) for [col, tp, kwargs] in config["features"]
 }
@@ -38,6 +43,7 @@ base_data, morphers = prep_data(
     data_files=input_files,
     group_by=["game_pk", "at_bat_number"],
     rename=config["rename"],
+    fixed_cols=fixed_inputs,
     cols=inputs,
 )
 

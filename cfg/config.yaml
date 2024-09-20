@@ -7,9 +7,13 @@ keys:
   - game_pk
   - at_bat_number
 
-features:
+# These are fixed for the whole sequence; we want them in the start of sequence position.
+fixed_features:
   - [pitcher_name, categorical, {}]
   - [batter_name, categorical, {}]
+
+# These vary pitch-by-pitch.
+features:
   - [pitch_name, categorical, {}]
   - [release_speed, numeric, {n_quantiles: 64}]
   - [plate_x, numeric, {n_quantiles: 64}]
@@ -34,7 +38,7 @@ tr_args:
   n_layers: 4
   layer_args:
     d_model: 256
-    ff_dim: 512
+    ff_dim: 768
   position_encoding: cope
   attn_args:
     n_q_heads: 8

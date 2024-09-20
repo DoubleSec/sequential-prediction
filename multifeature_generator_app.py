@@ -6,14 +6,14 @@ import seaborn as sns
 import seaborn.objects as so
 from matplotlib import pyplot as plt
 import polars as pl
-from morphers import Integerizer
+from morphers import Integerizer, Quantiler
 import streamlit as st
 
 from seqpred.data import prep_data, BaseDataset
 from seqpred.nn import SequentialMargeNet
 from seqpred.diag import rollout
 
-checkpoint_path = "./model/epoch=22-validation_loss=9.386.ckpt"
+checkpoint_path = "./model/epoch=24-validation_loss=10.077.ckpt"
 data_files = ["./data/2023_data.parquet"]
 
 st.set_page_config(page_title="Generation Tester", layout="wide")
@@ -32,7 +32,7 @@ colors = {
     "missed_bunt": "red",
     "pitchout": "green",
     "swinging_strike": "red",
-    "swining_strike_blocked": "red",
+    "swinging_strike_blocked": "red",
 }
 
 markers = {
@@ -53,6 +53,7 @@ markers = {
     "Slurve": ">",
     "Split-Finger": "D",
     "Sweeper": ">",
+    "-": "4",
 }
 
 
@@ -72,7 +73,6 @@ def unmorph(pitches, morphers):
                 vector = [vector]
             qs = morphers[pk].quantiles
             unmorphed_pitches[pk] = [qs[ceil(item * len(qs))] for item in vector]
-            # raise NotImplementedError("Later")
     return unmorphed_pitches
 
 
@@ -81,6 +81,20 @@ def load_model_and_data(config_path, checkpoint_path, data_path):
 
     with open(config_path, "r") as f:
         config = yaml.load(f, Loader=yaml.CLoader)
+
+    morpher_dispatch = {
+        "numeric": Quantiler,
+        "categorical": Integerizer,
+    }
+
+    fixed_inputs = {
+        col: (morpher_dispatch[tp], kwargs)
+        for [col, tp, kwargs] in config["fixed_features"]
+    }
+
+    inputs = {
+        col: (morpher_dispatch[tp], kwargs) for [col, tp, kwargs] in config["features"]
+    }
 
     model = SequentialMargeNet.load_from_checkpoint(checkpoint_path)
 
@@ -91,7 +105,8 @@ def load_model_and_data(config_path, checkpoint_path, data_path):
         data_files=data_path,
         group_by=["game_pk", "at_bat_number"],
         rename=config["rename"],
-        cols=None,
+        fixed_cols=fixed_inputs,
+        cols=inputs,
         morphers=morpher_dict,
     )
     ds = BaseDataset(
@@ -171,7 +186,7 @@ context_df = pl.DataFrame(
         {k: v.squeeze().cpu().numpy() for k, v in context.items()},
         morpher_dict,
     )
-)
+).with_columns(end_of_at_bat=pl.lit(False))
 generated_df = pl.DataFrame(
     {"source": "generated"}
     | unmorph(
@@ -179,14 +194,14 @@ generated_df = pl.DataFrame(
         morpher_dict,
     )
 )
-pitch_df = pl.concat([context_df, generated_df]).with_row_index(offset=1)
+pitch_df = pl.concat([context_df, generated_df]).with_row_index(offset=0).drop("source")
 
 col1, col2 = st.columns([0.7, 0.3])
 
 with col1:
 
     st.markdown("#### Pitches")
-    st.dataframe(pitch_df)
+    st.dataframe(pitch_df, hide_index=True)
 
     fig, ax = plt.subplots(1)
     fig.set_figwidth(12)
@@ -204,7 +219,7 @@ with col2:
         so.Plot()
         .add(
             so.Dot(pointsize=25),
-            data=pitch_df,
+            data=pitch_df[1:, :],
             x="plate_x",
             y="plate_z",
             color="description",
@@ -219,7 +234,7 @@ with col2:
         )
         .add(
             so.Text({"fontweight": "bold"}, color="white"),
-            data=pitch_df,
+            data=pitch_df[1:, :],
             x="plate_x",
             y="plate_z",
             text="index",

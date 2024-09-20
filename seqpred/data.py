@@ -46,6 +46,7 @@ def prep_data(
     data_files: str,
     group_by: list,
     rename: dict | None = None,
+    fixed_cols: dict | None = None,
     cols: dict | None = None,
     morphers: dict | None = None,
     data_output: str | None = None,
@@ -86,11 +87,31 @@ def prep_data(
         )
     )
 
+    start_sequence_tokens = input_data.unique(
+        ["game_pk", "at_bat_number"]
+    ).with_columns(
+        pitch_number=pl.lit(-1).cast(pl.Int64),
+        **{
+            column: (
+                pl.lit(None).cast(input_data[column].dtype)
+                if (
+                    input_data[column].dtype.is_numeric()
+                    or input_data[column].dtype.is_(pl.Boolean)
+                )
+                else pl.lit("start_of_sequence")
+            )
+            for column in cols.keys()
+        },
+    )
+    input_data = pl.concat([input_data, start_sequence_tokens])
+
+    all_cols = fixed_cols | cols
+
     # Use existing morpher states
     if morphers is None:
         morphers = {
             feature: morpher_class.from_data(input_data[feature], **kwargs)
-            for feature, (morpher_class, kwargs) in cols.items()
+            for feature, (morpher_class, kwargs) in all_cols.items()
         }
     else:
         morphers = morphers
@@ -122,57 +143,6 @@ def prep_data(
         }
         with open(morpher_output, "w") as f:
             yaml.dump(morpher_dict, f)
-
-    return input_data, morphers
-
-
-def prep_one_feature_data(
-    data_files: str,
-    group_by: list,
-    morphers: dict | None = None,
-    morpher_class=None,
-):
-    """Prepare dataset with only one feature, description (strike, ball, etc.)
-    Also adds a start of sequence and end of sequence token."""
-
-    input_dataframes = [pl.read_parquet(file) for file in data_files]
-    input_data = pl.concat(input_dataframes)
-
-    # Use existing morpher states
-    if morphers is None:
-        vocab = (
-            input_data["description"]
-            .filter(input_data["description"].is_not_null())
-            .unique()
-            .to_list()
-        )
-        vocab += ["start_of_pa", "end_of_pa"]
-        morphers = {"description": morpher_class({t: i for i, t in enumerate(vocab)})}
-    else:
-        morphers = morphers
-
-    input_data = (
-        input_data.select(
-            "game_pk",
-            "at_bat_number",
-            "pitch_number",
-            # morphed inputs
-            morphers["description"](
-                morphers["description"].fill_missing(pl.col("description"))
-            ).alias("description"),
-        )
-        .sort(["at_bat_number", "pitch_number"])
-        .group_by(group_by, maintain_order=True)
-        .agg(
-            *[pl.col(feature) for feature in morphers.keys()],
-            n_pitches=pl.col("pitch_number").count(),
-        )
-        .with_columns(
-            description=pl.lit([morphers["description"].vocab["start_of_pa"]])
-            .list.concat(pl.col("description"))
-            .list.concat(pl.lit([morphers["description"].vocab["end_of_pa"]]))
-        )
-    )
 
     return input_data, morphers
 
