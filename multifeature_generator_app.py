@@ -13,7 +13,7 @@ from seqpred.data import prep_data, BaseDataset
 from seqpred.nn import SequentialMargeNet
 from seqpred.diag import rollout
 
-checkpoint_path = "./model/epoch=24-validation_loss=10.077.ckpt"
+checkpoint_path = "./model/epoch=19-validation_loss=10.255.ckpt"
 data_files = ["./data/2023_data.parquet"]
 
 st.set_page_config(page_title="Generation Tester", layout="wide")
@@ -249,6 +249,8 @@ with col2:
     )
     st.markdown("#### Pitch Locations")
     st.pyplot(fig)
+
+    st.metric("Result", pitch_df["events"][-1])
 
 with st.sidebar:
     if n_generated is not None:

@@ -19,6 +19,7 @@ features:
   - [plate_x, numeric, {n_quantiles: 64}]
   - [plate_z, numeric, {n_quantiles: 64}]
   - [description, categorical, {}]
+  - [events, categorical, {}]
   - [end_of_at_bat, categorical, {}]
 
 # Optionally resume from a checkpoint
@@ -33,12 +34,12 @@ log_every_n: 20
 
 # Network spec
 precision: bf16-mixed
-hidden_size: 256
+hidden_size: 384
 tr_args:
   n_layers: 4
   layer_args:
-    d_model: 256
-    ff_dim: 768
+    d_model: 384
+    ff_dim: 1152
   position_encoding: cope
   attn_args:
     n_q_heads: 8
@@ -47,7 +48,7 @@ tr_args:
       n_positions: 8
 
 # Learning dynamics
-max_epochs: 25
+max_epochs: 10
 lr: 0.0002
-batch_size: 4096
+batch_size: 2048
 accumulate_batches: 1
